@@ -1,0 +1,187 @@
+import sys
+from collections import deque
+import heapq
+
+def parse_file(filename):
+    with open(filename, 'r') as file:
+        lines = [line.strip() for line in file.readlines()]
+        start_state = lines[0]
+        legal_states = []
+        unsafe_states = []
+        if len(lines) > 1 and lines[1]:
+            legal_states = expand_states(lines[1].split(','))
+        if len(lines) > 2 and lines[2]:
+            unsafe_states = expand_states(lines[2].split(','))
+        return start_state, set(legal_states), set(unsafe_states)
+
+def expand_states(states):
+    result = []
+    for st in states:
+        if 'X' in st:
+            i = st.index('X')
+            result += expand_states([st[:i] + '0' + st[i+1:], st[:i] + '1' + st[i+1:]])
+        else:
+            result.append(st)
+    return result
+
+def hamming_distance(s, goals):
+    return min(sum(a != b for a, b in zip(s, g)) for g in goals)
+
+def generate_children(s):
+    return [s[:i] + ('1' if s[i] == '0' else '0') + s[i+1:] for i in range(len(s))]
+
+def depth_limited_search(state, goals, unsafe, limit, expanded_order, visited):
+    stack = [(state, [state])]
+    while stack:
+        current, path = stack.pop()
+        if current in visited or current in unsafe:
+            continue
+        visited.add(current)
+        expanded_order.append(current)
+        if current in goals:
+            return path, True
+        if len(path) - 1 < limit:
+            children = generate_children(current)
+            for c in reversed(children):
+                if c not in visited and c not in unsafe:
+                    stack.append((c, path + [c]))
+    return [], False
+
+def hill_climbing(start, goals, unsafe, limit):
+    expanded_order = []
+    visited = set()
+    current = start
+    path = [start]
+    expansions = 0
+    while expansions < limit:
+        if current in visited:
+            return [], expanded_order
+        visited.add(current)
+        expanded_order.append(current)
+        expansions += 1
+        if current in goals:
+            return path, expanded_order
+        curr_h = hamming_distance(current, goals)
+        children = generate_children(current)
+        best_child = None
+        best_h = curr_h
+        for c in children:
+            if c not in unsafe and c not in visited:
+                ch = hamming_distance(c, goals)
+                if ch < best_h:
+                    best_h = ch
+                    best_child = c
+        if best_child is None:
+            return [], expanded_order
+        current = best_child
+        path.append(best_child)
+    return [], expanded_order
+
+def search(char, start, goals, unsafe, limit=1000):
+    expanded_order = []
+    if char == 'B':
+        # BFS
+        queue = deque([(start, [start])])
+        visited = set()
+        while queue and len(expanded_order) < limit:
+            s, p = queue.popleft()
+            if s in visited or s in unsafe:
+                continue
+            visited.add(s)
+            expanded_order.append(s)
+            if s in goals:
+                return ','.join(p), ','.join(expanded_order)
+            for c in generate_children(s):
+                if c not in visited and c not in unsafe:
+                    queue.append((c, p + [c]))
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    elif char == 'D':
+        # DFS
+        stack = [(start, [start])]
+        visited = set()
+        while stack and len(expanded_order) < limit:
+            s, p = stack.pop()
+            if s in visited or s in unsafe:
+                continue
+            visited.add(s)
+            expanded_order.append(s)
+            if s in goals:
+                return ','.join(p), ','.join(expanded_order)
+            children = generate_children(s)
+            for c in reversed(children):
+                if c not in visited and c not in unsafe:
+                    stack.append((c, p + [c]))
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    elif char == 'I':
+        # IDS
+        for d in range(limit + 1):
+            visited = set()
+            p, found = depth_limited_search(start, goals, unsafe, d, expanded_order, visited)
+            if found:
+                return ','.join(p), ','.join(expanded_order)
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    elif char == 'H':
+        # Hill-Climbing
+        p, exp = hill_climbing(start, goals, unsafe, limit)
+        if p and p[-1] in goals:
+            return ','.join(p), ','.join(exp)
+        else:
+            return "SEARCH FAILED", ','.join(exp)
+
+    elif char in ('G', 'A'):
+        # Greedy / A*
+        visited = set()
+        pq = []
+        counter = 0
+        if char == 'G':
+            # h-only
+            hval = hamming_distance(start, goals)
+            heapq.heappush(pq, (hval, counter, start, [start]))
+            counter += 1
+        else:
+            # A*: f = g + h
+            g = 0
+            f = g + hamming_distance(start, goals)
+            heapq.heappush(pq, (f, counter, start, [start]))
+            counter += 1
+        while pq and len(expanded_order) < limit:
+            _, _, s, p = heapq.heappop(pq)
+            if s in visited or s in unsafe:
+                continue
+            visited.add(s)
+            expanded_order.append(s)
+            if s in goals:
+                return ','.join(p), ','.join(expanded_order)
+            for c in generate_children(s):
+                if c not in visited and c not in unsafe:
+                    new_path = p + [c]
+                    if char == 'G':
+                        val = hamming_distance(c, goals)
+                    else:
+                        g = len(new_path) - 1
+                        val = g + hamming_distance(c, goals)
+                    heapq.heappush(pq, (val, counter, c, new_path))
+                    counter += 1
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    return "SEARCH FAILED", ""  # fallback
+
+def broken_printer(char, filename):
+    start, legal, unsafe = parse_file(filename)
+    path, expanded = search(char, start, legal, unsafe)
+    return path, expanded
+
+if __name__ == '__main__':
+    if len(sys.argv) < 3:
+        char = 'B'
+        filename = 'example1.txt'
+    else:
+        char = sys.argv[1]
+        filename = sys.argv[2]
+    path, expanded = broken_printer(char, filename)
+    # Print exactly two lines, no extra text:
+    print(path)
+    print(expanded)
