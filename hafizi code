@@ -1,0 +1,210 @@
+import sys
+from collections import deque
+import heapq
+
+def parse_file(filename):
+    with open(filename, 'r') as file:
+        lines = [line.strip() for line in file.readlines()]
+
+    start = lines[0]
+
+    if len(lines) > 1 and lines[1]:
+        legal = expand_states(lines[1].split(','))
+    else:
+        legal = []
+
+    if len(lines) > 2 and lines[2]:
+        unsafe = expand_states(lines[2].split(','))
+    else:
+        unsafe = []
+
+    return start, set(legal), set(unsafe)
+
+def expand_states(states):
+    result = []
+
+    for s in states:
+        if 'X' in s:
+            i = s.index('X')
+            result += expand_states([s[:i] + '0' + s[i+1:], s[:i] + '1' + s[i+1:]])
+        else:
+            result.append(s)
+
+    return result
+
+def generate_children(s):
+    return [s[:i] + ('1' if s[i] == '0' else '0') + s[i+1:] for i in range(len(s))]
+
+def hamming_distance(s, goals):
+    return min(sum(a != b for a, b in zip(s, g)) for g in goals)
+
+def depth_limited_search(start, goals, unsafe, limit, expanded, visited):
+    stack = [(start, [start])]
+
+    while stack:
+        state, path = stack.pop()
+
+        if state in visited or state in unsafe:
+            continue
+
+        visited.add(state)
+        expanded.append(state)
+
+        if state in goals:
+            return path, True
+
+        if len(path) - 1 < limit:
+            for child in reversed(generate_children(state)):
+                if child not in visited and child not in unsafe:
+                    stack.append((child, path + [child]))
+
+    return [], False
+
+def hill_climbing(start, goals, unsafe, limit):
+    visited = set()
+    expanded = []
+    path = [start]
+    current = start
+    steps = 0
+
+    while steps < limit:
+        if current in visited:
+            return [], expanded
+
+        visited.add(current)
+        expanded.append(current)
+        steps += 1
+
+        if current in goals:
+            return path, expanded
+
+        best_child = None
+        best_h = hamming_distance(current, goals)
+
+        for child in generate_children(current):
+            if child not in visited and child not in unsafe:
+                h = hamming_distance(child, goals)
+
+                if h < best_h:
+                    best_h = h
+                    best_child = child
+
+        if best_child is None:
+            return [], expanded
+
+        current = best_child
+        path.append(current)
+
+    return [], expanded
+
+def greedy_or_astar(mode, start, goals, unsafe, limit):
+    visited = set()
+    expanded = []
+    heap = []
+    counter = 0
+    h = hamming_distance(start, goals)
+
+    if mode == 'G':
+        heapq.heappush(heap, (h, counter, start, [start]))
+    else:
+        heapq.heappush(heap, (h, counter, start, [start]))  # f = g + h, g = 0
+
+    counter += 1
+
+    while heap and len(expanded) < limit:
+        _, _, state, path = heapq.heappop(heap)
+
+        if state in visited or state in unsafe:
+            continue
+
+        visited.add(state)
+        expanded.append(state)
+
+        if state in goals:
+            return ','.join(path), ','.join(expanded)
+
+        for child in generate_children(state):
+            if child not in visited and child not in unsafe:
+                new_path = path + [child]
+                g = len(new_path) - 1
+                h = hamming_distance(child, goals)
+                f = h if mode == 'G' else g + h
+
+                heapq.heappush(heap, (f, counter, child, new_path))
+                counter += 1
+
+    return "SEARCH FAILED", ','.join(expanded)
+
+def general_search(mode, start, goals, unsafe, limit):
+    visited = set()
+    expanded = []
+
+    if mode == 'I':
+        for d in range(limit + 1):
+            visited.clear()
+            path, found = depth_limited_search(start, goals, unsafe, d, expanded, visited)
+
+            if found:
+                return ','.join(path), ','.join(expanded)
+
+        return "SEARCH FAILED", ','.join(expanded)
+
+    if mode == 'H':
+        path, expanded = hill_climbing(start, goals, unsafe, limit)
+
+        if path:
+            return ','.join(path), ','.join(expanded)
+        else:
+            return "SEARCH FAILED", ','.join(expanded)
+
+    if mode in ('G', 'A'):
+        return greedy_or_astar(mode, start, goals, unsafe, limit)
+
+    # BFS or DFS
+    if mode == 'B':
+        frontier = deque([(start, [start])])
+    else:
+        frontier = [(start, [start])]
+
+    while frontier and len(expanded) < limit:
+        if mode == 'B':
+            state, path = frontier.popleft()
+        else:
+            state, path = frontier.pop()
+
+        if state in visited or state in unsafe:
+            continue
+
+        visited.add(state)
+        expanded.append(state)
+
+        if state in goals:
+            return ','.join(path), ','.join(expanded)
+
+        children = generate_children(state)
+
+        if mode == 'D':
+            children = reversed(children)
+
+        for child in children:
+            if child not in visited and child not in unsafe:
+                frontier.append((child, path + [child]))
+
+    return "SEARCH FAILED", ','.join(expanded)
+
+def broken_printer(mode, filename):
+    start, legal, unsafe = parse_file(filename)
+    return general_search(mode, start, legal, unsafe, 1000)
+
+if __name__ == '__main__':
+    if len(sys.argv) > 2:
+        mode = sys.argv[1]
+        filename = sys.argv[2]
+    else:
+        mode = 'B'
+        filename = 'example1.txt'
+
+    path, expanded = broken_printer(mode, filename)
+
+    print(path)
+    print(expanded)
